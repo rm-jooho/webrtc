@@ -1,6 +1,6 @@
 FROM golang:1.16
 
 ENV GO111MODULE=on
-RUN go get -u github.com/pion/webrtc/v3/examples/pion-to-pion/offer
+RUN go get -u github.com/rm-jooho/webrtc/v3/examples/pion-to-pion/offer
 
 CMD ["offer"]

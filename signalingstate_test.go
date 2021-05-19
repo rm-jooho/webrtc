@@ -3,7 +3,7 @@ package webrtc
 import (
 	"testing"
 
-	"github.com/pion/webrtc/v3/pkg/rtcerr"
+	"github.com/rm-jooho/webrtc/v3/pkg/rtcerr"
 	"github.com/stretchr/testify/assert"
 )
 

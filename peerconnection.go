@@ -20,8 +20,8 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/sdp/v3"
-	"github.com/pion/webrtc/v3/internal/util"
-	"github.com/pion/webrtc/v3/pkg/rtcerr"
+	"github.com/rm-jooho/webrtc/v3/internal/util"
+	"github.com/rm-jooho/webrtc/v3/pkg/rtcerr"
 )
 
 // PeerConnection represents a WebRTC connection that establishes a
@@ -82,6 +82,9 @@ type PeerConnection struct {
 	log logging.LeveledLogger
 
 	interceptorRTCPWriter interceptor.RTCPWriter
+
+	//jhms
+	negoHold int
 }
 
 // NewPeerConnection creates a PeerConnection with the default codecs and
@@ -282,6 +285,11 @@ func (pc *PeerConnection) OnNegotiationNeeded(f func()) {
 // onNegotiationNeeded enqueues negotiationNeededOp if necessary
 // caller of this method should hold `pc.mu` lock
 func (pc *PeerConnection) onNegotiationNeeded() {
+	//jhms
+	if pc.negoHold > 0 {
+		pc.negoHold++
+		return
+	}
 	// https://w3c.github.io/webrtc-pc/#updating-the-negotiation-needed-flag
 	// non-canon step 1
 	if pc.negotiationNeededState == negotiationNeededStateRun {
@@ -1584,7 +1592,7 @@ func (pc *PeerConnection) AddTrack(track TrackLocal) (*RTPSender, error) {
 	defer pc.mu.Unlock()
 	for _, t := range pc.rtpTransceivers {
 		if !t.stopped && t.kind == track.Kind() && t.Sender() == nil {
-			sender, err := pc.api.NewRTPSender(track, pc.dtlsTransport)
+			sender, err := pc.api.NewRTPSender(track, pc.dtlsTransport, 0)
 			if err == nil {
 				err = t.SetSender(sender, track)
 				if err != nil {
@@ -1600,7 +1608,7 @@ func (pc *PeerConnection) AddTrack(track TrackLocal) (*RTPSender, error) {
 		}
 	}
 
-	transceiver, err := pc.newTransceiverFromTrack(RTPTransceiverDirectionSendrecv, track)
+	transceiver, err := pc.newTransceiverFromTrack(RTPTransceiverDirectionSendrecv, track, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1634,7 +1642,7 @@ func (pc *PeerConnection) RemoveTrack(sender *RTPSender) (err error) {
 	return
 }
 
-func (pc *PeerConnection) newTransceiverFromTrack(direction RTPTransceiverDirection, track TrackLocal) (t *RTPTransceiver, err error) {
+func (pc *PeerConnection) newTransceiverFromTrack(direction RTPTransceiverDirection, track TrackLocal, ssrc SSRC) (t *RTPTransceiver, err error) {
 	var (
 		r *RTPReceiver
 		s *RTPSender
@@ -1645,9 +1653,9 @@ func (pc *PeerConnection) newTransceiverFromTrack(direction RTPTransceiverDirect
 		if err != nil {
 			return
 		}
-		s, err = pc.api.NewRTPSender(track, pc.dtlsTransport)
+		s, err = pc.api.NewRTPSender(track, pc.dtlsTransport, ssrc)
 	case RTPTransceiverDirectionSendonly:
-		s, err = pc.api.NewRTPSender(track, pc.dtlsTransport)
+		s, err = pc.api.NewRTPSender(track, pc.dtlsTransport, ssrc)
 	default:
 		err = errPeerConnAddTransceiverFromTrackSupport
 	}
@@ -1664,10 +1672,15 @@ func (pc *PeerConnection) AddTransceiverFromKind(kind RTPCodecType, init ...RTPT
 	}
 
 	direction := RTPTransceiverDirectionSendrecv
+	var sendSsrc SSRC = 0
+
 	if len(init) > 1 {
 		return nil, errPeerConnAddTransceiverFromKindOnlyAcceptsOne
 	} else if len(init) == 1 {
 		direction = init[0].Direction
+		if len(init[0].SendEncodings) == 1 {
+			sendSsrc = init[0].SendEncodings[0].SSRC
+		}
 	}
 	switch direction {
 	case RTPTransceiverDirectionSendonly, RTPTransceiverDirectionSendrecv:
@@ -1679,7 +1692,7 @@ func (pc *PeerConnection) AddTransceiverFromKind(kind RTPCodecType, init ...RTPT
 		if err != nil {
 			return nil, err
 		}
-		t, err = pc.newTransceiverFromTrack(direction, track)
+		t, err = pc.newTransceiverFromTrack(direction, track, sendSsrc)
 		if err != nil {
 			return nil, err
 		}
@@ -1705,13 +1718,18 @@ func (pc *PeerConnection) AddTransceiverFromTrack(track TrackLocal, init ...RTPT
 	}
 
 	direction := RTPTransceiverDirectionSendrecv
+	var sendSsrc SSRC = 0
+
 	if len(init) > 1 {
 		return nil, errPeerConnAddTransceiverFromTrackOnlyAcceptsOne
 	} else if len(init) == 1 {
 		direction = init[0].Direction
+		if len(init[0].SendEncodings) == 1 {
+			sendSsrc = init[0].SendEncodings[0].SSRC
+		}
 	}
 
-	t, err = pc.newTransceiverFromTrack(direction, track)
+	t, err = pc.newTransceiverFromTrack(direction, track, sendSsrc)
 	if err == nil {
 		pc.mu.Lock()
 		pc.addRTPTransceiver(t)

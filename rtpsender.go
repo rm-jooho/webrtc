@@ -43,7 +43,7 @@ type RTPSender struct {
 }
 
 // NewRTPSender constructs a new RTPSender
-func (api *API) NewRTPSender(track TrackLocal, transport *DTLSTransport) (*RTPSender, error) {
+func (api *API) NewRTPSender(track TrackLocal, transport *DTLSTransport, ssrc SSRC) (*RTPSender, error) {
 	if track == nil {
 		return nil, errRTPSenderTrackNil
 	} else if transport == nil {
@@ -55,13 +55,16 @@ func (api *API) NewRTPSender(track TrackLocal, transport *DTLSTransport) (*RTPSe
 		return nil, err
 	}
 
+	if ssrc == 0 {
+		ssrc = SSRC(randutil.NewMathRandomGenerator().Uint32())
+	}
 	r := &RTPSender{
 		track:      track,
 		transport:  transport,
 		api:        api,
 		sendCalled: make(chan struct{}),
 		stopCalled: make(chan struct{}),
-		ssrc:       SSRC(randutil.NewMathRandomGenerator().Uint32()),
+		ssrc:       ssrc,
 		id:         id,
 		srtpStream: &srtpWriterFuture{},
 	}

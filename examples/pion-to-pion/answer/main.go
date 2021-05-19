@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/examples/internal/signal"
+	"github.com/rm-jooho/webrtc/v3"
+	"github.com/rm-jooho/webrtc/v3/examples/internal/signal"
 )
 
 func signalCandidate(addr string, c *webrtc.ICECandidate) error {

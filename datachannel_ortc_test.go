@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/pion/transport/test"
-	"github.com/pion/webrtc/v3/internal/util"
+	"github.com/rm-jooho/webrtc/v3/internal/util"
 	"github.com/stretchr/testify/assert"
 )
 
