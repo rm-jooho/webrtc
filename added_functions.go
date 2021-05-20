@@ -6,13 +6,16 @@ import (
 	"github.com/rm-jooho/webrtc/v3/pkg/rtcerr"
 )
 
-// jhms
+// 일시적으로 OnNegotiation 호출을 중지
+// 복수의 로컬 미디어 처리를 한번의 SDP 생성으로 축약하기 위해 사용
+// 충분히 테스트되지 않았음. 원하는 동작을 위해 부가 작업 필요함...개선 필요
 func (pc *PeerConnection) HoldOnNegotiation() {
 	if pc.negoHold == 0 {
 		pc.negoHold = 1
 	}
 }
 
+// HoldOnNegotiation에 의해 중지된 OnNegotiation 호출을 재개
 func (pc *PeerConnection) ResumeOnNegotiation() error {
 	previousVal := pc.negoHold
 	pc.negoHold = 0
@@ -31,69 +34,41 @@ func (pc *PeerConnection) ResumeOnNegotiation() error {
 	return nil
 }
 
-// jhms
-
+// 사라진 GetHeaderExtensionID API
 func (m *MediaEngine) GetHeaderExtensionID(extension RTPHeaderExtensionCapability) (val int, audioNegotiated, videoNegotiated bool) {
 	return m.getHeaderExtensionID(extension)
 }
 
-// AddTrack adds a Track to the PeerConnection
-func (pc *PeerConnection) AddTrackSendonly(track TrackLocal, ssrc uint32) (*RTPSender, error) {
+// transceiver 재사용이 되고 sendonly만 적용되고 SSRC도 적용 가능한 transceiver 획득
+func (pc *PeerConnection) AddSendonlyTrack(track TrackLocal, ssrc uint32) (*RTPSender, error) {
 	if pc.isClosed.get() {
 		return nil, &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
 	}
 
-	var transceiver *RTPTransceiver
-	/*
-		for i, t := range pc.GetTransceivers() {
-			fmt.Printf("idx:%d, stopped:%v kind:%s sender:%p direction:%s\n", i, t.stopped, t.kind.String(), t.Sender(), t.Direction().String())
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	for _, t := range pc.rtpTransceivers {
+		if !t.stopped && t.kind == track.Kind() && t.Sender() == nil && t.Direction() == RTPTransceiverDirectionInactive {
+			sender, err := pc.api.NewRTPSender(track, pc.dtlsTransport, SSRC(ssrc))
+			if err == nil {
+				err = t.SetSender(sender, track)
+				if err != nil {
+					_ = sender.Stop()
+					t.setSender(nil)
+				}
+			}
+			if err != nil {
+				return nil, err
+			}
+			pc.onNegotiationNeeded()
+			return sender, nil
 		}
-	*/
-	for _, t := range pc.GetTransceivers() {
-		if !t.stopped && t.kind == track.Kind() && (t.Sender() == nil && t.Direction() == RTPTransceiverDirectionInactive) {
-			transceiver = t
-			break
-		}
-	}
-	if transceiver != nil {
-		sender, err := pc.api.NewRTPSender(track, pc.dtlsTransport, SSRC(ssrc))
-		if err != nil {
-			return nil, err
-		}
-		transceiver.setSender(sender)
-		// we still need to call setSendingTrack to ensure direction has changed
-		if err := transceiver.setSendingTrack(track); err != nil {
-			// inactive 상태였다면 setSendingTrack시 sendonly로 변함
-			//transceiver.setDirection(RTPTransceiverDirectionSendonly)
-			return nil, err
-		}
-		pc.onNegotiationNeeded()
-
-		return sender, nil
 	}
 
-	var err error
-	if ssrc == 0 {
-		init := RtpTransceiverInit{
-			Direction: RTPTransceiverDirectionSendonly,
-		}
-		transceiver, err = pc.AddTransceiverFromTrack(track, init)
-	} else {
-		init := RtpTransceiverInit{
-			Direction: RTPTransceiverDirectionSendonly,
-			SendEncodings: []RTPEncodingParameters{
-				RTPEncodingParameters{
-					RTPCodingParameters{
-						SSRC: SSRC(ssrc),
-					},
-				},
-			},
-		}
-		transceiver, err = pc.AddTransceiverFromTrack(track, init)
-	}
+	transceiver, err := pc.newTransceiverFromTrack(RTPTransceiverDirectionSendonly, track, SSRC(ssrc))
 	if err != nil {
 		return nil, err
 	}
-
+	pc.addRTPTransceiver(transceiver)
 	return transceiver.Sender(), nil
 }
